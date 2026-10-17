@@ -1,0 +1,1 @@
+export function buildBetawiseGlobeDocument(..._args) { return '<!doctype html><html><body></body></html>'; }

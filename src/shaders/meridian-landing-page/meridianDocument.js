@@ -1,0 +1,1 @@
+export function buildMeridianDocument(..._args) { return '<!doctype html><html><body></body></html>'; }

@@ -1,0 +1,1 @@
+export function buildAsciiFieldDocument(..._args) { return '<!doctype html><html><body></body></html>'; }
