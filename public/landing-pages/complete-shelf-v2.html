@@ -2643,10 +2643,11 @@
     const scratchVector = new THREE.Vector3();
     const shelfBoardTop = 0.47;
     const spacing = 1.5;
+    const isMobilePerf = window.innerWidth <= 768 || (navigator.maxTouchPoints > 0 && window.innerWidth <= 1024);
     const PAGINATED_LEAF_COUNT = 4;
     const SPREAD_COUNT = PAGINATED_LEAF_COUNT + 1;
-    const FLEXIBLE_PAGE_SEGMENTS = 18;
-    const FLEXIBLE_PAGE_VERTICAL_SEGMENTS = 8;
+    const FLEXIBLE_PAGE_SEGMENTS = isMobilePerf ? 10 : 18;
+    const FLEXIBLE_PAGE_VERTICAL_SEGMENTS = isMobilePerf ? 4 : 8;
     const PAGE_TURN_COMMIT_PROGRESS = 0.18;
     const COVER_OPEN_COMMIT_PROGRESS = 0.16;
     const COVER_CLOSE_COMMIT_PROGRESS = 0.2;
@@ -2847,6 +2848,12 @@
     }
 
     let sharedPaperFaceTexture = null;
+    let sharedPaperStockCanvas = null;
+    let sharedClothBumpTexture = null;
+    let sharedClothSurfaceMaps = null;
+    let sharedFoilTexture = null;
+    const sharedSpineTextureCache = new Map();
+    const sharedBackCoverTextureCache = new Map();
     let sharedPageEdgeTextures = null;
     let sharedContactShadowTexture = null;
 
@@ -3016,7 +3023,8 @@
       return configureCanvasTexture(new THREE.CanvasTexture(canvasTexture));
     }
 
-    function makeFoilTexture(book) {
+    function makeFoilTexture() {
+      if (sharedFoilTexture) return sharedFoilTexture;
       const foilCanvas = document.createElement("canvas");
       foilCanvas.width = 768;
       foilCanvas.height = 1152;
@@ -3040,10 +3048,12 @@
 
       drawHeart(ctx, W / 2, 1075, 12, "#ffffff", 0.9);
 
-      return configureCanvasTexture(new THREE.CanvasTexture(foilCanvas));
+      sharedFoilTexture = configureCanvasTexture(new THREE.CanvasTexture(foilCanvas));
+      return sharedFoilTexture;
     }
 
     function makeClothBumpTexture(book) {
+      if (sharedClothBumpTexture) return sharedClothBumpTexture;
       const bumpCanvas = document.createElement("canvas");
       bumpCanvas.width = 256;
       bumpCanvas.height = 256;
@@ -3080,13 +3090,15 @@
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
       texture.repeat.set(5, 8);
-      return configureCanvasTexture(texture, {
+      sharedClothBumpTexture = configureCanvasTexture(texture, {
         color: false,
         anisotropy: 12
       });
+      return sharedClothBumpTexture;
     }
 
     function makeClothSurfaceMaps(book) {
+      if (sharedClothSurfaceMaps) return sharedClothSurfaceMaps;
       const size = 256;
       const heightField = new Float32Array(size * size);
       const normalCanvas = document.createElement("canvas");
@@ -3149,62 +3161,64 @@
         });
       };
 
-      return {
+      sharedClothSurfaceMaps = {
         normal: configureWeaveMap(normalCanvas, "cloth-normal"),
         roughness: configureWeaveMap(roughnessCanvas, "cloth-roughness")
       };
+      return sharedClothSurfaceMaps;
     }
 
-    function makeEmbossMap(sourceTexture, name) {
-      const texture = new THREE.CanvasTexture(sourceTexture.image);
-      texture.name = name;
-      texture.wrapS = sourceTexture.wrapS;
-      texture.wrapT = sourceTexture.wrapT;
-      texture.repeat.copy(sourceTexture.repeat);
-      texture.offset.copy(sourceTexture.offset);
-      texture.center.copy(sourceTexture.center);
-      texture.rotation = sourceTexture.rotation;
-      return configureCanvasTexture(texture, {
-        color: false,
-        anisotropy: 16
-      });
+    function makeEmbossMap(sourceTexture) {
+      return sourceTexture;
     }
 
     function drawPaperSurface(ctx, width, height, random) {
-      ctx.fillStyle = "#FCF8F8";
-      ctx.fillRect(0, 0, width, height);
+      if (!sharedPaperStockCanvas) {
+        const stockW = 512;
+        const stockH = 768;
+        const stockCanvas = document.createElement("canvas");
+        stockCanvas.width = stockW;
+        stockCanvas.height = stockH;
+        const sCtx = stockCanvas.getContext("2d");
+        const sRandom = random || seededRandom(hashSeed("working-volumes-paper-stock"));
 
-      const paperWash = ctx.createLinearGradient(0, 0, width, height);
-      paperWash.addColorStop(0, "rgba(252, 248, 248, 0.55)");
-      paperWash.addColorStop(0.5, "rgba(251, 239, 239, 0.52)");
-      paperWash.addColorStop(1, "rgba(245, 175, 175, 0.48)");
-      ctx.fillStyle = paperWash;
-      ctx.fillRect(0, 0, width, height);
+        sCtx.fillStyle = "#FCF8F8";
+        sCtx.fillRect(0, 0, stockW, stockH);
 
-      for (let fiber = 0; fiber < 2400; fiber += 1) {
-        const x = random() * width;
-        const y = random() * height;
-        const length = 5 + random() * 34;
-        const lightFiber = random() > 0.44;
-        ctx.strokeStyle = lightFiber
-          ? `rgba(255,255,255,${0.025 + random() * 0.045})`
-          : `rgba(92,76,55,${0.018 + random() * 0.035})`;
-        ctx.lineWidth = 0.45 + random() * 0.65;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(
-          Math.min(width, x + length),
-          y + (random() - 0.5) * 2.2
-        );
-        ctx.stroke();
+        const paperWash = sCtx.createLinearGradient(0, 0, stockW, stockH);
+        paperWash.addColorStop(0, "rgba(252, 248, 248, 0.55)");
+        paperWash.addColorStop(0.5, "rgba(251, 239, 239, 0.52)");
+        paperWash.addColorStop(1, "rgba(245, 175, 175, 0.48)");
+        sCtx.fillStyle = paperWash;
+        sCtx.fillRect(0, 0, stockW, stockH);
+
+        for (let fiber = 0; fiber < 1200; fiber += 1) {
+          const x = sRandom() * stockW;
+          const y = sRandom() * stockH;
+          const length = 5 + sRandom() * 34;
+          const lightFiber = sRandom() > 0.44;
+          sCtx.strokeStyle = lightFiber
+            ? `rgba(255,255,255,${0.025 + sRandom() * 0.045})`
+            : `rgba(92,76,55,${0.018 + sRandom() * 0.035})`;
+          sCtx.lineWidth = 0.45 + sRandom() * 0.65;
+          sCtx.beginPath();
+          sCtx.moveTo(x, y);
+          sCtx.lineTo(
+            Math.min(stockW, x + length),
+            y + (sRandom() - 0.5) * 2.2
+          );
+          sCtx.stroke();
+        }
+
+        for (let fleck = 0; fleck < 600; fleck += 1) {
+          const tone = Math.round(112 + sRandom() * 94);
+          sCtx.fillStyle = `rgba(${tone},${tone - 5},${tone - 13},${0.016 + sRandom() * 0.025})`;
+          const size = 0.5 + sRandom() * 1.1;
+          sCtx.fillRect(sRandom() * stockW, sRandom() * stockH, size, size);
+        }
+        sharedPaperStockCanvas = stockCanvas;
       }
-
-      for (let fleck = 0; fleck < 1200; fleck += 1) {
-        const tone = Math.round(112 + random() * 94);
-        ctx.fillStyle = `rgba(${tone},${tone - 5},${tone - 13},${0.016 + random() * 0.025})`;
-        const size = 0.5 + random() * 1.1;
-        ctx.fillRect(random() * width, random() * height, size, size);
-      }
+      ctx.drawImage(sharedPaperStockCanvas, 0, 0, width, height);
     }
 
     function makePaperFaceTexture(book, printed = false) {
@@ -3636,12 +3650,16 @@
     }
 
     function makeSpineTexture(book) {
+      const cacheKey = book.color || "#F9DFDF";
+      if (sharedSpineTextureCache.has(cacheKey)) {
+        return sharedSpineTextureCache.get(cacheKey);
+      }
       const spineCanvas = document.createElement("canvas");
-      spineCanvas.width = 384;
-      spineCanvas.height = 1536;
+      spineCanvas.width = 256;
+      spineCanvas.height = 1024;
       const ctx = spineCanvas.getContext("2d");
-      const random = seededRandom(hashSeed(`${book.id}-spine-cloth`) + book.seed);
-      ctx.fillStyle = book.color;
+      const random = seededRandom(hashSeed(`${cacheKey}-spine-cloth`));
+      ctx.fillStyle = cacheKey;
       ctx.fillRect(0, 0, spineCanvas.width, spineCanvas.height);
 
       const shade = ctx.createLinearGradient(0, 0, spineCanvas.width, 0);
@@ -3652,7 +3670,7 @@
       ctx.fillStyle = shade;
       ctx.fillRect(0, 0, spineCanvas.width, spineCanvas.height);
 
-      for (let thread = 0; thread < 1900; thread += 1) {
+      for (let thread = 0; thread < 600; thread += 1) {
         const x = random() * spineCanvas.width;
         const y = random() * spineCanvas.height;
         const vertical = random() > 0.42;
@@ -3680,10 +3698,12 @@
       ctx.fillStyle = bottomShade;
       ctx.fillRect(0, 0, spineCanvas.width, spineCanvas.height);
 
-      return configureCanvasTexture(
+      const texture = configureCanvasTexture(
         new THREE.CanvasTexture(spineCanvas),
-        { anisotropy: 16 }
+        { anisotropy: 12 }
       );
+      sharedSpineTextureCache.set(cacheKey, texture);
+      return texture;
     }
 
     function makeSpineFoilTexture(book) {
@@ -3724,13 +3744,17 @@
     }
 
     function makeBackCoverTexture(book) {
+      const cacheKey = book.color || "#F9DFDF";
+      if (sharedBackCoverTextureCache.has(cacheKey)) {
+        return sharedBackCoverTextureCache.get(cacheKey);
+      }
       const backCanvas = document.createElement("canvas");
-      backCanvas.width = 768;
-      backCanvas.height = 1152;
+      backCanvas.width = 512;
+      backCanvas.height = 768;
       const ctx = backCanvas.getContext("2d");
-      const random = seededRandom(hashSeed(`${book.id}-back-cloth`) + book.seed);
+      const random = seededRandom(hashSeed(`${cacheKey}-back-cloth`));
 
-      ctx.fillStyle = book.color;
+      ctx.fillStyle = cacheKey;
       ctx.fillRect(0, 0, backCanvas.width, backCanvas.height);
 
       const edgeShade = ctx.createLinearGradient(0, 0, backCanvas.width, 0);
@@ -3741,7 +3765,7 @@
       ctx.fillStyle = edgeShade;
       ctx.fillRect(0, 0, backCanvas.width, backCanvas.height);
 
-      for (let thread = 0; thread < 2600; thread += 1) {
+      for (let thread = 0; thread < 800; thread += 1) {
         const x = random() * backCanvas.width;
         const y = random() * backCanvas.height;
         const length = 5 + random() * 30;
@@ -3768,7 +3792,9 @@
       ctx.fillStyle = vignette;
       ctx.fillRect(0, 0, backCanvas.width, backCanvas.height);
 
-      return configureCanvasTexture(new THREE.CanvasTexture(backCanvas));
+      const texture = configureCanvasTexture(new THREE.CanvasTexture(backCanvas));
+      sharedBackCoverTextureCache.set(cacheKey, texture);
+      return texture;
     }
 
     function makeBackFoilTexture(book) {
@@ -3881,7 +3907,7 @@
       const clothBumpTexture = makeClothBumpTexture(book);
       const clothSurfaceMaps = makeClothSurfaceMaps(book);
       const paperFaceTexture = makePaperFaceTexture(book);
-      const interiorPageTextures = makeInteriorPageTextures(book);
+      const interiorPageTextures = [];
       const endpaperTexture = makeEndpaperTexture(book);
       const pageEdgeTextures = makePageEdgeTextures(book);
       const spineTexture = makeSpineTexture(book);
@@ -4039,9 +4065,9 @@
       });
       const pageMaterial = createFadeMaterial(shared.page);
       const headbandMaterial = createFadeMaterial(shared.headband);
-      const interiorPageMaterials = interiorPageTextures.map((texture) => {
+      const interiorPageMaterials = Array.from({ length: 8 }, () => {
         const material = createFadeMaterial(shared.pageSheet);
-        material.map = texture;
+        material.map = paperFaceTexture;
         material.bumpMap = paperFaceTexture;
         material.bumpScale = 0.0012;
         material.roughness = 0.96;
@@ -4113,7 +4139,7 @@
         backSurfaceLayered: true,
         clothPbrMaps: true,
         foilEmbossed: true,
-        interiorPageDesigns: interiorPageTextures.length,
+        interiorPageDesigns: 8,
         flexiblePageSegments: FLEXIBLE_PAGE_SEGMENTS,
         clothLikePageDeformation: true,
         turnInStrips: 8,
@@ -4530,6 +4556,8 @@
         clothSurfaceMaps,
         paperFaceTexture,
         interiorPageTextures,
+        interiorPageMaterials,
+        interiorPagesLoaded: false,
         endpaperTexture,
         pageEdgeTextures,
         spineTexture,
@@ -4588,6 +4616,19 @@
           depth
         }
       };
+    }
+
+    function ensureInteriorPagesLoaded(rig) {
+      if (!rig || rig.interiorPagesLoaded) return;
+      rig.interiorPagesLoaded = true;
+      const textures = makeInteriorPageTextures(rig.data);
+      rig.interiorPageTextures = textures;
+      rig.interiorPageMaterials.forEach((material, idx) => {
+        if (textures[idx]) {
+          material.map = textures[idx];
+          material.needsUpdate = true;
+        }
+      });
     }
 
     let detailViewOffsetY = 0;
@@ -4778,14 +4819,15 @@
     }
 
     function addLights() {
-      roomLights.hemisphere = new THREE.HemisphereLight(0xFCF8F8, 0xF5AFAF, 0.46);
+      roomLights.hemisphere = new THREE.HemisphereLight(0xFCF8F8, 0xF5AFAF, isMobilePerf ? 0.56 : 0.46);
       scene.add(roomLights.hemisphere);
 
       const key = new THREE.DirectionalLight(0xFCF8F8, 0.96);
       key.name = "shadow-key";
       key.position.set(-4.6, 7.4, 5.8);
       key.castShadow = true;
-      key.shadow.mapSize.set(2048, 2048);
+      const shadowSize = isMobilePerf ? 1024 : 2048;
+      key.shadow.mapSize.set(shadowSize, shadowSize);
       key.shadow.camera.left = -6;
       key.shadow.camera.right = 6;
       key.shadow.camera.top = 6;
@@ -4794,7 +4836,7 @@
       key.shadow.camera.far = 18;
       key.shadow.bias = -0.00018;
       key.shadow.normalBias = 0.018;
-      key.shadow.radius = 3.5;
+      key.shadow.radius = isMobilePerf ? 2 : 3.5;
       scene.add(key);
       roomLights.key = key;
 
@@ -4805,7 +4847,7 @@
       scene.add(softKey);
       roomLights.softKey = softKey;
 
-      const fill = new THREE.DirectionalLight(0xFBEFEF, 0.22);
+      const fill = new THREE.DirectionalLight(0xFBEFEF, isMobilePerf ? 0.34 : 0.22);
       fill.name = "cool-fill";
       fill.position.set(5.5, 3.6, 4.2);
       scene.add(fill);
@@ -4818,30 +4860,32 @@
       scene.add(rim);
       roomLights.rim = rim;
 
-      const backFill = new THREE.RectAreaLight(0xFBEFEF, 1.45, 3.8, 4.8);
-      backFill.name = "back-cover-softbox";
-      backFill.position.set(-1.8, 2.9, -4.5);
-      backFill.lookAt(-0.1, 1.45, 0);
-      scene.add(backFill);
-      roomLights.backFill = backFill;
+      if (!isMobilePerf) {
+        const backFill = new THREE.RectAreaLight(0xFBEFEF, 1.45, 3.8, 4.8);
+        backFill.name = "back-cover-softbox";
+        backFill.position.set(-1.8, 2.9, -4.5);
+        backFill.lookAt(-0.1, 1.45, 0);
+        scene.add(backFill);
+        roomLights.backFill = backFill;
 
-      const spineRake = new THREE.RectAreaLight(0xFCF8F8, 1.15, 0.9, 4.6);
-      spineRake.name = "spine-rake";
-      spineRake.position.set(-4.6, 3.2, 1.1);
-      spineRake.lookAt(-0.55, 1.5, 0);
-      scene.add(spineRake);
-      roomLights.spineRake = spineRake;
+        const spineRake = new THREE.RectAreaLight(0xFCF8F8, 1.15, 0.9, 4.6);
+        spineRake.name = "spine-rake";
+        spineRake.position.set(-4.6, 3.2, 1.1);
+        spineRake.lookAt(-0.55, 1.5, 0);
+        scene.add(spineRake);
+        roomLights.spineRake = spineRake;
 
-      const pageRake = new THREE.RectAreaLight(0xFCF8F8, 1.05, 1.15, 3.8);
-      pageRake.name = "page-edge-rake";
-      pageRake.position.set(4.2, 4.8, 3.1);
-      pageRake.lookAt(0.65, 1.55, 0);
-      scene.add(pageRake);
-      roomLights.pageRake = pageRake;
+        const pageRake = new THREE.RectAreaLight(0xFCF8F8, 1.05, 1.15, 3.8);
+        pageRake.name = "page-edge-rake";
+        pageRake.position.set(4.2, 4.8, 3.1);
+        pageRake.lookAt(0.65, 1.55, 0);
+        scene.add(pageRake);
+        roomLights.pageRake = pageRake;
+      }
     }
 
     function addDust() {
-      const dustCount = 110;
+      const dustCount = isMobilePerf ? 42 : 110;
       const positions = new Float32Array(dustCount * 3);
       const random = seededRandom(20260728);
       for (let index = 0; index < dustCount; index += 1) {
@@ -5153,6 +5197,13 @@
 
       flex.curve = nextCurve;
       flex.twist = nextTwist;
+      const shouldUpdateNormals = settleImmediately
+        || Math.abs(nextCurve - (flex.lastNormalCurve ?? -99)) > 0.0035
+        || Math.abs(nextTwist - (flex.lastNormalTwist ?? -99)) > 0.0035;
+      if (shouldUpdateNormals) {
+        flex.lastNormalCurve = nextCurve;
+        flex.lastNormalTwist = nextTwist;
+      }
       flex.surfaces.forEach((surface) => {
         const { position, base, direction, geometry } = surface;
         for (let vertex = 0; vertex < position.count; vertex += 1) {
@@ -5183,7 +5234,9 @@
           position.setXYZ(vertex, x, y, z);
         }
         position.needsUpdate = true;
-        geometry.computeVertexNormals();
+        if (shouldUpdateNormals) {
+          geometry.computeVertexNormals();
+        }
       });
     }
 
@@ -5356,12 +5409,17 @@
       position = targetPosition;
     }
 
+    function getMaxVisibleShelfDistance() {
+      return viewWidth <= 640 ? 1.55 : viewWidth <= 1024 ? 2.15 : 2.55;
+    }
+
     function snapRigToShelfSlot(rig, index) {
       let offset = index - position;
       offset -= Math.round(offset / BOOKS.length) * BOOKS.length;
       const distance = Math.abs(offset);
       const focus = 1 - clamp(distance, 0, 1);
-      const fadeProgress = clamp((distance - 2.55) / 0.7, 0, 1);
+      const fadeStart = getMaxVisibleShelfDistance();
+      const fadeProgress = clamp((distance - fadeStart) / 0.7, 0, 1);
       const opacity = 1 - smoothstep(fadeProgress);
 
       rig.root.position.set(
@@ -5384,7 +5442,9 @@
       rig.fadeMaterials.forEach((material) => {
         material.opacity = opacity;
       });
-      rig.contactShadow.visible = true;
+      const isVisible = opacity > 0.01;
+      rig.root.visible = isVisible;
+      rig.contactShadow.visible = isVisible;
       rig.contactShadow.material.opacity = opacity * 0.24;
       rig.hit.visible = opacity > 0.12;
       rig.lastOffset = offset;
@@ -5854,6 +5914,7 @@
     }
 
     function onPointerMove(event) {
+      if (event.pointerType === "touch" || heroSwipe.active || pageDrag.active) return;
       setPointerFromEvent(event);
       positionPointerLabel();
       requestFrame();
@@ -5915,6 +5976,9 @@
           ? origin
           : inspectButton;
       activeBook = bookRigs[selectedIndex];
+      ensureInteriorPagesLoaded(activeBook);
+      activeBook.root.visible = true;
+      shelfStage.visible = true;
       activeBook.contactShadow.visible = false;
       populateDetail(activeBook.data);
       updatePageControls(false);
@@ -6005,6 +6069,7 @@
     function finishOpening() {
       if (!activeBook) return;
       applyOpeningPose(1);
+      shelfStage.visible = false;
       mode = "detail";
       transitionTime = 1;
       controls.target.copy(inspectCameraTarget);
@@ -6020,6 +6085,7 @@
       if (mode !== "detail") return;
       cancelPageDrag();
       resetDetailPress();
+      shelfStage.visible = true;
       mode = "closing";
       transitionTime = 0;
       readingOpen = false;
@@ -6175,6 +6241,18 @@
         }
         rig.lastOffset = offset;
 
+        const fadeStart = getMaxVisibleShelfDistance();
+        const fadeProgress = clamp((distance - fadeStart) / 0.7, 0, 1);
+        const targetOpacity = 1 - smoothstep(fadeProgress);
+        rig.opacity = reducedMotion
+          ? targetOpacity
+          : damp(rig.opacity, targetOpacity, 18, delta);
+        const isVisible = rig.opacity > 0.01 || targetOpacity > 0.01;
+        rig.root.visible = isVisible;
+        rig.contactShadow.visible = isVisible;
+        rig.hit.visible = rig.opacity > 0.12;
+        if (!isVisible) return;
+
         rig.root.position.x = damp(rig.root.position.x, targetX, speed, delta);
         rig.root.position.y = damp(rig.root.position.y, targetY, speed, delta);
         rig.root.position.z = damp(rig.root.position.z, targetZ, speed, delta);
@@ -6183,17 +6261,10 @@
         const nextScale = damp(rig.root.scale.x, targetScale, speed, delta);
         rig.root.scale.setScalar(nextScale);
 
-        const fadeProgress = clamp((distance - 2.55) / 0.7, 0, 1);
-        const targetOpacity = 1 - smoothstep(fadeProgress);
-        rig.opacity = reducedMotion
-          ? targetOpacity
-          : damp(rig.opacity, targetOpacity, 18, delta);
         rig.fadeMaterials.forEach((material) => {
           material.opacity = rig.opacity;
         });
-        rig.contactShadow.visible = true;
         rig.contactShadow.material.opacity = rig.opacity * 0.24;
-        rig.hit.visible = rig.opacity > 0.12;
 
         const isHovered = hoveredIndex === index && mode === "hero";
         const hoverPreview = isHovered && !reducedMotion;
@@ -6204,23 +6275,25 @@
           reducedMotion ? 1000 : 13,
           delta
         );
-        rig.pagePivots.forEach((pagePivot) => {
-          pagePivot.rotation.y = damp(
-            pagePivot.rotation.y,
-            0,
-            reducedMotion ? 1000 : 13,
-            delta
-          );
-          pagePivot.rotation.z = damp(
-            pagePivot.rotation.z,
-            0,
-            reducedMotion ? 1000 : 13,
-            delta
-          );
-          updateFlexiblePage(pagePivot, 0, delta);
-        });
+        if (Math.abs(rig.pagePivots[0].rotation.y) > 0.0005) {
+          rig.pagePivots.forEach((pagePivot) => {
+            pagePivot.rotation.y = damp(
+              pagePivot.rotation.y,
+              0,
+              reducedMotion ? 1000 : 13,
+              delta
+            );
+            pagePivot.rotation.z = damp(
+              pagePivot.rotation.z,
+              0,
+              reducedMotion ? 1000 : 13,
+              delta
+            );
+            updateFlexiblePage(pagePivot, 0, delta);
+          });
+        }
 
-        const idle = reducedMotion ? 0 : Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * focus;
+        const idle = (reducedMotion || isMobilePerf) ? 0 : Math.sin(elapsed * 0.72 + index * 0.8) * 0.012 * focus;
         rig.motion.position.y = damp(rig.motion.position.y, idle + (hoverPreview ? 0.035 : 0), 9, delta);
         rig.motion.rotation.x = damp(
           rig.motion.rotation.x,
@@ -6269,7 +6342,7 @@
     }
 
     function updateDust(elapsed) {
-      if (reducedMotion) return;
+      if (reducedMotion || isMobilePerf) return;
       const dust = scene.getObjectByName("paper-dust");
       if (dust) {
         dust.rotation.y = elapsed * 0.012;
@@ -6277,7 +6350,10 @@
       }
     }
 
+    let activeCooldown = 0.65;
+
     function requestFrame() {
+      activeCooldown = Math.max(activeCooldown, 0.72);
       if (!rafId && !suspended) {
         rafId = requestAnimationFrame(frame);
       }
@@ -6301,7 +6377,9 @@
       lastTime = time;
 
       if (pointerDirty) updateHover();
-      updateShelfLayout(delta, elapsed);
+      if (shelfStage.visible) {
+        updateShelfLayout(delta, elapsed);
+      }
       updateTransition(delta);
       updateDust(elapsed);
       const themeIsMoving = updateTheme(delta);
@@ -6321,13 +6399,21 @@
 
       renderer.render(scene, camera);
 
-      const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0;
-      const shouldContinue = !reducedMotion
+      const shelfMoving = Math.abs(position - targetPosition) > 0.0005 || wheelIdle > 0 || heroSwipe.active;
+      if (shelfMoving || themeIsMoving || mode === "opening" || mode === "closing" || pageDrag.active) {
+        activeCooldown = Math.max(activeCooldown, 0.45);
+      } else {
+        activeCooldown = Math.max(0, activeCooldown - delta);
+      }
+      const shouldContinue = (!reducedMotion && !isMobilePerf)
+        || activeCooldown > 0
         || mode === "opening"
         || mode === "closing"
         || shelfMoving
         || themeIsMoving;
-      if (shouldContinue && !suspended) requestFrame();
+      if (shouldContinue && !suspended) {
+        rafId = requestAnimationFrame(frame);
+      }
     }
 
     function resize() {
@@ -6335,7 +6421,8 @@
       viewHeight = window.innerHeight;
       configureResponsiveTargets();
       renderer.setSize(viewWidth, viewHeight, false);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, viewWidth < 820 ? 1.5 : 2));
+      const maxDpr = viewWidth <= 640 ? 1.25 : viewWidth <= 1024 ? 1.5 : 2;
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
       camera.aspect = viewWidth / viewHeight;
       camera.updateProjectionMatrix();
 
@@ -6532,7 +6619,7 @@
       try {
         renderer = new THREE.WebGLRenderer({
           canvas,
-          antialias: true,
+          antialias: !isMobilePerf,
           alpha: true,
           powerPreference: "high-performance"
         });
@@ -6545,7 +6632,7 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.93;
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = isMobilePerf ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
       renderer.setClearColor(0x000000, 0);
 
       scene = new THREE.Scene();
@@ -6586,6 +6673,7 @@
 
       bookRigs = BOOKS.map((book, index) => {
         const rig = createBookRig(book, index);
+        snapRigToShelfSlot(rig, index);
         shelfStage.add(rig.root);
         return rig;
       });
